@@ -20,11 +20,14 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual environments
+# Virtual environments (不复制本地 .venv，Docker 内重建)
 venv/
 env/
 ENV/
-.venv
+.venv/
+
+# uv 缓存
+.uv/
 
 # IDE
 .vscode/
@@ -46,11 +49,11 @@ test_audio.mp3
 *.log
 logs/
 
-# Environment
+# Environment (运行时配置)
 .env
 !.env.example
 
-# Docker
+# Docker 文件本身
 .dockerignore
 Dockerfile
 docker-compose.yml
@@ -64,6 +67,13 @@ docker-compose.yml
 .coverage
 htmlcov/
 
+# Linting/Type checking
+.ruff_cache/
+.mypy_cache/
+
 # OS
 .DS_Store
 Thumbs.db
+
+# Demo (可选，根据需要)
+# demo/

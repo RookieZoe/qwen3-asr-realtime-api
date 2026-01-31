@@ -2,7 +2,6 @@ import base64
 import io
 import numpy as np
 from typing import Union, Optional
-import opuslib
 
 
 def decode_base64_audio(audio_b64: str) -> Optional[bytes]:
@@ -31,7 +30,9 @@ def decode_pcm_to_numpy(audio_bytes: bytes, sample_rate: int = 16000,
 
 
 def decode_opus_to_numpy(audio_bytes: bytes, sample_rate: int = 16000) -> Optional[np.ndarray]:
+    """Decode Opus audio to numpy array. Requires opuslib (optional dependency)."""
     try:
+        import opuslib
         decoder = opuslib.Decoder(sample_rate, 1)
         
         frame_size = int(sample_rate * 0.02)
@@ -41,6 +42,11 @@ def decode_opus_to_numpy(audio_bytes: bytes, sample_rate: int = 16000) -> Option
         audio_array = audio_array.astype(np.float32) / 32768.0
         
         return audio_array
+    except ImportError:
+        raise ImportError(
+            "opuslib is required for Opus audio decoding. "
+            "Install with: uv sync --extra audio"
+        )
     except Exception:
         return None
 

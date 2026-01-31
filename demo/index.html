@@ -530,8 +530,12 @@
         <div class="config-panel">
             <div class="config-row">
                 <div class="config-item">
-                    <label>WebSocket URL</label>
-                    <input type="text" id="wsUrl" value="ws://10.0.0.24:8080/api-ws/v1/realtime">
+                    <label>API 服务商</label>
+                    <select id="apiProvider" onchange="toggleApiConfig()">
+                        <option value="local" selected>本地服务器 (Local Server)</option>
+                        <option value="dashscope-cn">阿里云百炼 - 中国内地 (DashScope China)</option>
+                        <option value="dashscope-intl">阿里云百炼 - 国际 (DashScope International)</option>
+                    </select>
                 </div>
                 <div class="config-item">
                     <label>识别语言</label>
@@ -541,8 +545,49 @@
                         <option value="en">英文 (en)</option>
                         <option value="ja">日语 (ja)</option>
                         <option value="ko">韩语 (ko)</option>
+                        <option value="de">德语 (de)</option>
+                        <option value="ru">俄语 (ru)</option>
+                        <option value="fr">法语 (fr)</option>
+                        <option value="pt">葡萄牙语 (pt)</option>
+                        <option value="ar">阿拉伯语 (ar)</option>
+                        <option value="it">意大利语 (it)</option>
+                        <option value="es">西班牙语 (es)</option>
+                        <option value="hi">印地语 (hi)</option>
+                        <option value="id">印尼语 (id)</option>
+                        <option value="th">泰语 (th)</option>
+                        <option value="tr">土耳其语 (tr)</option>
+                        <option value="uk">乌克兰语 (uk)</option>
+                        <option value="vi">越南语 (vi)</option>
                     </select>
                 </div>
+            </div>
+            
+            <!-- 本地服务器配置 -->
+            <div id="localConfig" class="config-row">
+                <div class="config-item full-width">
+                    <label>WebSocket URL</label>
+                    <input type="text" id="wsUrl" value="ws://10.0.0.24:8080/api-ws/v1/realtime">
+                </div>
+            </div>
+            
+            <!-- 官方 API 配置 -->
+            <div id="officialConfig" class="config-row" style="display: none;">
+                <div class="config-item">
+                    <label>API Key <a href="https://help.aliyun.com/zh/model-studio/get-api-key" target="_blank" style="font-size: 12px; color: #667eea;">(获取 API Key)</a></label>
+                    <input type="password" id="apiKey" placeholder="sk-xxxxxxxxxxxxxxxx">
+                </div>
+                <div class="config-item">
+                    <label>模型</label>
+                    <select id="model">
+                        <option value="qwen3-asr-flash-realtime" selected>qwen3-asr-flash-realtime (稳定版)</option>
+                        <option value="qwen3-asr-flash-realtime-2025-10-27">qwen3-asr-flash-realtime-2025-10-27 (快照版)</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div id="officialWarning" class="info-box" style="display: none; background: #d4edda; border-left-color: #28a745;">
+                <h4>✅ Demo 服务器代理模式</h4>
+                <p>使用官方 API 需要通过 Demo 服务器代理。请先启动 Demo 服务器：<code>python demo/server.py</code>，然后通过 <code>http://localhost:8080</code> 访问此页面。</p>
             </div>
         </div>
 
@@ -706,6 +751,65 @@
         let stashText = '';
         let totalChars = 0;
 
+        // ============ API 配置切换 ============
+        function toggleApiConfig() {
+            const provider = document.getElementById('apiProvider').value;
+            const localConfig = document.getElementById('localConfig');
+            const officialConfig = document.getElementById('officialConfig');
+            const officialWarning = document.getElementById('officialWarning');
+            
+            if (provider === 'local') {
+                localConfig.style.display = 'flex';
+                officialConfig.style.display = 'none';
+                officialWarning.style.display = 'none';
+            } else {
+                localConfig.style.display = 'none';
+                officialConfig.style.display = 'flex';
+                officialWarning.style.display = 'block';
+            }
+            
+            addEvent('config', `切换到 ${provider === 'local' ? '本地服务器' : '阿里云百炼 API'}`);
+        }
+
+        function getWebSocketConfig() {
+            const provider = document.getElementById('apiProvider').value;
+            
+            if (provider === 'local') {
+                // Check if running from demo server (has /config endpoint)
+                // Demo server provides proxy at /ws/proxy/local
+                const wsUrl = document.getElementById('wsUrl').value;
+                return {
+                    url: wsUrl,
+                    protocols: null
+                };
+            } else {
+                const apiKey = document.getElementById('apiKey').value.trim();
+                const model = document.getElementById('model').value;
+                
+                if (!apiKey) {
+                    throw new Error('请输入 API Key');
+                }
+                
+                if (!apiKey.startsWith('sk-')) {
+                    throw new Error('API Key 格式不正确，应以 sk- 开头');
+                }
+                
+                // Use demo server's proxy endpoint for DashScope
+                // Demo server handles auth headers server-side
+                const region = provider === 'dashscope-cn' ? 'cn' : 'intl';
+                const origin = window.location.origin;
+                const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+                const host = window.location.host;
+                
+                const proxyUrl = `${wsProtocol}://${host}/ws/proxy/dashscope?api_key=${encodeURIComponent(apiKey)}&model=${encodeURIComponent(model)}&region=${region}`;
+                
+                return {
+                    url: proxyUrl,
+                    protocols: null
+                };
+            }
+        }
+
         // ============ 模式切换 ============
         function switchMode(mode) {
             currentMode = mode;
@@ -800,11 +904,26 @@
         // ============ WebSocket 连接 ============
         function connectWebSocket(mode) {
             return new Promise((resolve, reject) => {
-                const wsUrl = document.getElementById('wsUrl').value;
-                ws = new WebSocket(wsUrl);
+                let wsConfig;
+                try {
+                    wsConfig = getWebSocketConfig();
+                } catch (error) {
+                    reject(error);
+                    return;
+                }
+                
+                const provider = document.getElementById('apiProvider').value;
+                
+                // For DashScope API, we use local proxy endpoint
+                // The proxy handles auth headers server-side
+                if (wsConfig.protocols) {
+                    ws = new WebSocket(wsConfig.url, wsConfig.protocols);
+                } else {
+                    ws = new WebSocket(wsConfig.url);
+                }
                 
                 ws.onopen = () => {
-                    addEvent('websocket', `${mode} 模式连接成功`);
+                    addEvent('websocket', `${mode} 模式连接成功 (${provider})`);
                     updateStatus(mode, true, false);
                     startHeartbeat();
                     resolve();
@@ -812,13 +931,12 @@
                 
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
-                    // 忽略 ping/pong 响应
                     if (data.type === 'pong' || data.type === 'ping') return;
                     handleMessage(data, mode);
                 };
                 
                 ws.onerror = (error) => {
-                    addEvent('websocket', '错误', error);
+                    addEvent('error', '连接失败，请检查网络或 API Key 是否正确');
                     reject(error);
                 };
                 
@@ -896,6 +1014,8 @@
 
         function sendSessionUpdate(mode) {
             const language = document.getElementById('language').value;
+            const provider = document.getElementById('apiProvider').value;
+            const isOfficial = provider !== 'local';
             
             const config = {
                 event_id: 'event_update_' + Date.now(),
@@ -903,9 +1023,18 @@
                 session: {
                     input_audio_format: 'pcm',
                     sample_rate: 16000,
-                    input_audio_transcription: { language: language }
+                    input_audio_transcription: {}
                 }
             };
+            
+            // Only set language if not 'auto' - DashScope API doesn't accept 'auto'
+            if (language && language !== 'auto') {
+                config.session.input_audio_transcription.language = language;
+            }
+            
+            if (isOfficial) {
+                config.session.modalities = ['text'];
+            }
             
             if (mode === 'vad') {
                 config.session.turn_detection = {
@@ -914,12 +1043,11 @@
                     silence_duration_ms: parseInt(document.getElementById('silenceDuration').value)
                 };
             } else {
-                // Manual 模式：禁用 turn_detection
                 config.session.turn_detection = null;
             }
             
             ws.send(JSON.stringify(config));
-            addEvent('session.update', `${mode} 模式配置`, config.session);
+            addEvent('session.update', `${mode} 模式配置 (${provider})`, config.session);
         }
 
         function updateStatus(mode, connected, active) {
@@ -1029,7 +1157,7 @@
                 
             } catch (error) {
                 addEvent('error', 'VAD 开始失败: ' + error.message);
-                alert('无法访问麦克风: ' + error.message);
+                alert('启动失败: ' + error.message);
             }
         }
 
@@ -1128,19 +1256,24 @@
                 return;
             }
             
-            resetResults();
-            manualAudioSent = false;
-            
-            await connectWebSocket('manual');
-            
-            manualIsProcessing = true;
-            updateStatus('manual', true, true);
-            
-            document.getElementById('manualStartBtn').disabled = true;
-            document.getElementById('manualCommitBtn').disabled = false;
-            document.getElementById('manualStopBtn').disabled = false;
-            
-            addEvent('manual', 'Manual 模式开始，等待提交');
+            try {
+                resetResults();
+                manualAudioSent = false;
+                
+                await connectWebSocket('manual');
+                
+                manualIsProcessing = true;
+                updateStatus('manual', true, true);
+                
+                document.getElementById('manualStartBtn').disabled = true;
+                document.getElementById('manualCommitBtn').disabled = false;
+                document.getElementById('manualStopBtn').disabled = false;
+                
+                addEvent('manual', 'Manual 模式开始，等待提交');
+            } catch (error) {
+                addEvent('error', 'Manual 模式启动失败: ' + error.message);
+                alert('启动失败: ' + error.message);
+            }
         }
 
         async function sendManualAudio() {

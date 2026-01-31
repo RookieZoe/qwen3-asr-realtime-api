@@ -1,0 +1,12 @@
+# Demo 依赖
+# 仅用于运行 SDK 演示脚本和 Demo 服务器
+# 安装: pip install -r demo/requirements.txt
+
+# Demo Server (WebSocket 代理)
+aiohttp>=3.9.0
+
+# DashScope SDK (阿里云官方 SDK)
+dashscope>=1.25.6
+
+# 音频录制 (VAD 模式需要)
+pyaudio>=0.2.14

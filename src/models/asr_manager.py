@@ -3,16 +3,12 @@ import torch
 import warnings
 from typing import Optional, Dict, Any
 import os
-import sys
 
-# 忽略已知的 vLLM/PyTorch 警告
 warnings.filterwarnings("ignore", message="Casting torch.bfloat16 to torch.float16")
 warnings.filterwarnings("ignore", message="Please use the new API settings to control TF32")
 warnings.filterwarnings("ignore", message="The following generation flags are not valid")
 warnings.filterwarnings("ignore", message="We must use the `spawn` multiprocessing start method")
 warnings.filterwarnings("ignore", category=UserWarning, module="torch")
-
-sys.path.insert(0, '/home/zoe/ai_lab/workspace/Qwen3-ASR')
 
 from utils.logger import get_logger
 

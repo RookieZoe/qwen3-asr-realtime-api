@@ -1,0 +1,114 @@
+[project]
+name = "qwen3-asr-realtime-server"
+version = "1.0.0"
+description = "Compatible Qwen3-ASR-realtime WebSocket API Server"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Your Name", email = "your@email.com" }
+]
+keywords = ["asr", "speech-recognition", "qwen", "websocket", "realtime"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "websockets>=12.0",
+    "numpy>=1.24.0",
+    # Pin torch/torchaudio to versions compatible with vllm 0.14.0 and CUDA 12.9
+    "torch==2.9.1",
+    "torchaudio==2.9.1",
+    "transformers==4.57.6",
+    "silero-vad>=4.0.0",
+    "pydantic>=2.5.0",
+    # CRITICAL: vllm must be exactly 0.14.0 - qwen-asr is incompatible with 0.15.x
+    "vllm==0.14.0",
+    "qwen-asr>=0.0.6",
+    "qwen-omni-utils",
+    "accelerate>=1.12.0",
+    "librosa",
+    "soundfile",
+]
+
+[project.optional-dependencies]
+demo = [
+    "dashscope>=1.25.6",
+    "pyaudio>=0.2.14",
+]
+
+audio = [
+    "opuslib>=3.0.1",
+    "sox",
+]
+
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+all = [
+    "qwen3-asr-realtime-server[demo,audio,dev]",
+]
+
+[project.scripts]
+qwen3-asr-server = "main:run_server"
+
+[project.urls]
+Homepage = "https://github.com/your-org/qwen3-asr-realtime-server"
+Documentation = "https://github.com/your-org/qwen3-asr-realtime-server#readme"
+Repository = "https://github.com/your-org/qwen3-asr-realtime-server"
+Issues = "https://github.com/your-org/qwen3-asr-realtime-server/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[tool.uv.sources]
+qwen-asr = { path = "../Qwen3-ASR", editable = true }
+torch = { index = "pytorch-cu129" }
+torchaudio = { index = "pytorch-cu129" }
+torchvision = { index = "pytorch-cu129" }
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
