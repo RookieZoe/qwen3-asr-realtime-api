@@ -1,6 +1,7 @@
 import json
 import asyncio
 import os
+import time
 import numpy as np
 from typing import Dict, Any, Optional
 from fastapi import WebSocket, WebSocketDisconnect
@@ -24,6 +25,8 @@ from models.asr_session import ASRSession
 logger = get_logger(__name__)
 
 STREAMING_CHUNK_SIZE_SEC = float(os.getenv("STREAMING_CHUNK_SIZE_SEC", "2.0"))
+# Auto-commit interval in seconds (to prevent memory overflow on long continuous speech)
+AUTO_COMMIT_INTERVAL_SEC = float(os.getenv("AUTO_COMMIT_INTERVAL_SEC", "60.0"))
 
 # Language code mapping: ISO code -> Qwen3-ASR language name
 LANGUAGE_CODE_MAP = {
@@ -106,6 +109,9 @@ class WebSocketHandler:
         self.previous_item_id: str = ""
         self.speech_active: bool = False
         
+        self.last_commit_time: float = 0.0
+        self.segment_start_time: float = 0.0
+        
         self.finished: bool = False
         
     async def handle(self):
@@ -143,11 +149,6 @@ class WebSocketHandler:
             event_type = str(event_type)
         
         logger.debug(f"Received event: {event_type} (id: {event_id})")
-        
-        # 处理心跳 ping
-        if event_type == 'ping':
-            await self._send_event({'event_id': message.get('event_id'), 'type': 'pong'})
-            return
         
         handlers = {
             "session.update": self._handle_session_update,
@@ -240,11 +241,13 @@ class WebSocketHandler:
         self.audio_buffer = np.concatenate([self.audio_buffer, audio_array])
         self.total_samples += len(audio_array)
         
+        current_time = time.time()
+        
         if self.vad_enabled and self.vad_manager:
             await self._process_vad(audio_array)
         elif not self.vad_enabled and not self.current_item_id:
-            # Manual 模式：首次接收音频时创建 item
             self.current_item_id = generate_item_id()
+            self.segment_start_time = current_time
             await self._send_event(create_conversation_item_created_event(
                 item_id=self.current_item_id,
                 previous_item_id=self.previous_item_id
@@ -255,6 +258,8 @@ class WebSocketHandler:
             interim_result = await self.asr_session.get_interim_result()
             if interim_result:
                 await self._send_transcription_text(interim_result)
+        
+        await self._check_auto_commit(current_time)
     
     async def _process_vad(self, audio_chunk: np.ndarray):
         if self.vad_manager is None:
@@ -265,6 +270,7 @@ class WebSocketHandler:
             if result.get("speech_started") and not self.speech_active:
                 self.speech_active = True
                 self.current_item_id = generate_item_id()
+                self.segment_start_time = time.time()
                 await self._send_event(create_speech_started_event(
                     audio_start_ms=result["audio_start_ms"],
                     item_id=self.current_item_id
@@ -332,6 +338,47 @@ class WebSocketHandler:
             self.vad_manager.reset()
         
         self.audio_buffer = np.array([], dtype=np.float32)
+        self.last_commit_time = time.time()
+        self.segment_start_time = self.last_commit_time
+    
+    async def _check_auto_commit(self, current_time: float):
+        if not self.current_item_id:
+            return
+        
+        if self.segment_start_time == 0:
+            self.segment_start_time = current_time
+            return
+        
+        elapsed = current_time - self.segment_start_time
+        if elapsed >= AUTO_COMMIT_INTERVAL_SEC:
+            logger.info(f"Auto-commit triggered after {elapsed:.1f}s")
+            await self._auto_commit_and_continue()
+    
+    async def _auto_commit_and_continue(self):
+        if not self.current_item_id:
+            return
+        
+        await self._send_event(create_input_audio_buffer_committed_event(
+            previous_item_id=self.previous_item_id,
+            item_id=self.current_item_id
+        ))
+        
+        if self.asr_session:
+            final_result = await self.asr_session.finish()
+            logger.info(f"Auto-commit ASR result: {final_result}")
+            await self._send_transcription_completed(final_result)
+            await self.asr_session.reset()
+        
+        self.previous_item_id = self.current_item_id
+        self.current_item_id = generate_item_id()
+        self.segment_start_time = time.time()
+        self.last_commit_time = self.segment_start_time
+        self.audio_buffer = np.array([], dtype=np.float32)
+        
+        await self._send_event(create_conversation_item_created_event(
+            item_id=self.current_item_id,
+            previous_item_id=self.previous_item_id
+        ))
     
     async def _handle_session_finish(self, message: Dict[str, Any]):
         logger.info(f"Session finish requested: {self.session_id}")
@@ -360,11 +407,11 @@ class WebSocketHandler:
         ))
     
     async def _send_transcription_completed(self, result: Dict[str, str]):
-        if not self.previous_item_id:
+        if not self.current_item_id:
             return
         
         await self._send_event(create_transcription_completed_event(
-            item_id=self.previous_item_id,
+            item_id=self.current_item_id,
             content_index=0,
             language=result.get("language", "zh"),
             emotion=result.get("emotion", "neutral"),

@@ -89,5 +89,5 @@ temp/
 tmp/
 cache/
 
-# Audio test files (保留 test.wav 作为测试用例)
-test_audio.mp3
+# models
+models
