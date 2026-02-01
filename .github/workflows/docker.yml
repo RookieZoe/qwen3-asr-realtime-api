@@ -1,21 +1,7 @@
 name: Build Docker Image
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'docker/**'
-      - 'pyproject.toml'
-      - 'src/**'
-      - 'main.py'
-      - '.github/workflows/docker.yml'
   workflow_dispatch:
-    inputs:
-      force_build:
-        description: 'Force build even if no changes'
-        required: false
-        default: 'false'
-        type: boolean
 
 env:
   DOCKER_REPO_NAME: rookiezoe/qwen3-asr-realtime
