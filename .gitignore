@@ -89,5 +89,6 @@ temp/
 tmp/
 cache/
 
-# models
-models
+# checkpoints
+checkpoints/
+ckpts/

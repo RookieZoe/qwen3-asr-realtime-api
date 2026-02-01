@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   qwen3-asr-realtime:
@@ -8,14 +8,15 @@ services:
     image: qwen3-asr-realtime:latest
     container_name: qwen3-asr-server
     ports:
-      - "${SERVER_PORT:-8001}:8001"
+      - "${SERVER_PORT:-8080}:8080"
     environment:
       - SERVER_HOST=0.0.0.0
-      - SERVER_PORT=8001
+      - SERVER_PORT=8080
       - QWEN3_ASR_MODEL_PATH=${QWEN3_ASR_MODEL_PATH:-Qwen/Qwen3-ASR-1.7B}
       - GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.5}
       - MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-32}
-      - MODEL_DTYPE=${MODEL_DTYPE:-half}
+      # Model dtype: auto, float16, bfloat16, float32
+      - MODEL_DTYPE=${MODEL_DTYPE:-auto}
       - VAD_ENABLED=${VAD_ENABLED:-true}
       - VAD_THRESHOLD=${VAD_THRESHOLD:-0.5}
       - VAD_SILENCE_DURATION_MS=${VAD_SILENCE_DURATION_MS:-400}
@@ -33,7 +34,13 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3

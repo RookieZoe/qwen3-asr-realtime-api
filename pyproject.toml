@@ -30,6 +30,7 @@ dependencies = [
     "transformers==4.57.6",
     "silero-vad>=4.0.0",
     "pydantic>=2.5.0",
+    "python-dotenv>=1.0.0",
     # CRITICAL: vllm must be exactly 0.14.0 - qwen-asr is incompatible with 0.15.x
     "vllm==0.14.0",
     "qwen-asr>=0.0.6",
@@ -90,7 +91,6 @@ url = "https://download.pytorch.org/whl/cu129"
 explicit = true
 
 [tool.uv.sources]
-qwen-asr = { path = "../Qwen3-ASR", editable = true }
 torch = { index = "pytorch-cu129" }
 torchaudio = { index = "pytorch-cu129" }
 torchvision = { index = "pytorch-cu129" }

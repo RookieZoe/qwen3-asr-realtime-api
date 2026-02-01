@@ -38,11 +38,11 @@ COPY . .
 RUN mkdir -p models
 
 # Expose port
-EXPOSE 8001
+EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')" || exit 1
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
 
 # Run the server using uv
 CMD ["uv", "run", "python", "main.py"]

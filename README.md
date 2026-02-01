@@ -62,7 +62,7 @@ uv sync --all-extras
 
 ```bash
 QWEN3_ASR_MODEL_PATH=Qwen/Qwen3-ASR-1.7B  # 模型路径或 HuggingFace ID
-SERVER_PORT=8001                          # 服务端口
+SERVER_PORT=8080                          # 服务端口
 GPU_MEMORY_UTILIZATION=0.5                # GPU 显存使用率
 ```
 
@@ -74,7 +74,7 @@ make start
 uv run python main.py
 ```
 
-服务启动后访问: `ws://localhost:8001/api-ws/v1/realtime`
+服务启动后访问: `ws://localhost:8080/api-ws/v1/realtime`
 
 ### 6. 测试
 
@@ -149,7 +149,7 @@ docker-compose up -d
 ```bash
 docker build -t qwen3-asr-realtime .
 docker run -d \
-  -p 8001:8001 \
+  -p 8080:8080 \
   --gpus all \
   -e QWEN3_ASR_MODEL_PATH=Qwen/Qwen3-ASR-1.7B \
   -e GPU_MEMORY_UTILIZATION=0.5 \
@@ -207,7 +207,7 @@ import json
 import websockets
 
 async def recognize():
-    uri = "ws://localhost:8001/api-ws/v1/realtime"
+    uri = "ws://localhost:8080/api-ws/v1/realtime"
     
     async with websockets.connect(uri) as ws:
         # 1. 等待 session.created
@@ -307,11 +307,11 @@ make test-vad      # VAD 集成测试
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `SERVER_HOST` | `0.0.0.0` | 服务绑定地址 |
-| `SERVER_PORT` | `8001` | 服务端口 |
+| `SERVER_PORT` | `8080` | 服务端口 |
 | `QWEN3_ASR_MODEL_PATH` | `Qwen/Qwen3-ASR-1.7B` | 模型路径或 HF ID |
 | `GPU_MEMORY_UTILIZATION` | `0.5` | GPU 显存使用率 |
 | `MAX_NEW_TOKENS` | `32` | 每次推理最大 token 数 |
-| `MODEL_DTYPE` | `half` | 模型数据类型 (half/float) |
+| `MODEL_DTYPE` | `auto` | 模型数据类型 (auto/float16/bfloat16/float32) |
 | `VAD_ENABLED` | `true` | 默认启用 VAD |
 | `VAD_THRESHOLD` | `0.5` | VAD 检测阈值 |
 | `VAD_SILENCE_DURATION_MS` | `400` | 静音时长 (毫秒) |
@@ -331,7 +331,7 @@ uv run python -c "import torch; print(torch.cuda.is_available())"
 
 确认服务正在运行:
 ```bash
-curl http://localhost:8001/health
+curl http://localhost:8080/health
 ```
 
 ### 无识别结果
