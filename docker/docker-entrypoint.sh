@@ -81,4 +81,4 @@ export LOG_LEVEL
 echo >&3 "$0: Starting Qwen3-ASR server..."
 
 # Start the server
-exec python main.py
+exec python3 main.py
