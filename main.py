@@ -135,9 +135,62 @@ async def lifespan(app: FastAPI):
     logger.info("Server shutdown complete")
 
 
+WEBSOCKET_API_DOCS = """
+## WebSocket API
+
+### 端点
+```
+ws://host:port/api-ws/v1/realtime
+```
+
+### 客户端 → 服务端 事件
+
+| 事件类型 | 说明 |
+|----------|------|
+| `session.update` | 配置会话参数 (VAD/语言/音频格式) |
+| `input_audio_buffer.append` | 发送 base64 编码的音频数据 |
+| `input_audio_buffer.commit` | 提交音频缓冲区 (Manual 模式) |
+| `session.finish` | 结束会话 |
+
+### 服务端 → 客户端 事件
+
+| 事件类型 | 说明 |
+|----------|------|
+| `session.created` | 会话创建成功 |
+| `session.updated` | 配置更新成功 |
+| `input_audio_buffer.speech_started` | VAD 检测到语音开始 |
+| `input_audio_buffer.speech_stopped` | VAD 检测到语音结束 |
+| `conversation.item.input_audio_transcription.text` | 中间转写结果 |
+| `conversation.item.input_audio_transcription.completed` | 最终转写结果 |
+| `session.finished` | 会话结束 |
+| `error` | 错误信息 |
+
+### session.update 示例
+
+```json
+{
+  "type": "session.update",
+  "session": {
+    "input_audio_format": "pcm",
+    "sample_rate": 16000,
+    "input_audio_transcription": {
+      "language": "zh"
+    },
+    "turn_detection": {
+      "type": "server_vad",
+      "threshold": 0.5,
+      "silence_duration_ms": 400
+    }
+  }
+}
+```
+
+设置 `turn_detection: null` 切换到 Manual 模式。
+"""
+
 app = FastAPI(
     title="Qwen3-ASR-Realtime Server",
-    description="Compatible with Alibaba Cloud Qwen3-ASR-realtime API",
+    description="Compatible with Alibaba Cloud Qwen3-ASR-realtime API\n" + WEBSOCKET_API_DOCS,
     version="1.0.0",
     lifespan=lifespan,
 )

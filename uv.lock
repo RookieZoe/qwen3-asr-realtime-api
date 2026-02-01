@@ -4796,7 +4796,7 @@ wheels = [
 ]
 
 [[package]]
-name = "qwen3-asr-realtime-server"
+name = "qwen3-asr-realtime-api"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
@@ -4868,7 +4868,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "qwen-asr", specifier = ">=0.0.6" },
     { name = "qwen-omni-utils" },
-    { name = "qwen3-asr-realtime-server", extras = ["demo", "audio", "dev"], marker = "extra == 'all'" },
+    { name = "qwen3-asr-realtime-api", extras = ["demo", "audio", "dev"], marker = "extra == 'all'" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "silero-vad", specifier = ">=4.0.0" },
     { name = "soundfile" },

@@ -1,0 +1,115 @@
+name: Build Docker Image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docker/**'
+      - 'pyproject.toml'
+      - 'src/**'
+      - 'main.py'
+      - '.github/workflows/docker.yml'
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build even if no changes'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  DOCKER_REPO_NAME: rookiezoe/qwen3-asr-realtime
+
+jobs:
+  get_env:
+    runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.set_outputs.outputs.VERSION }}
+      SHOULD_BUILD: ${{ steps.set_outputs.outputs.SHOULD_BUILD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - id: set_outputs
+        name: Set outputs
+        run: |
+          # Get version from pyproject.toml
+          VERSION=$(grep -m1 'version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+
+          # Check if this version tag already exists on Docker Hub
+          EXISTING_TAG=$(curl -s "https://hub.docker.com/v2/repositories/${DOCKER_REPO_NAME}/tags/${VERSION}" 2>/dev/null | jq -r '.name // "none"')
+
+          if [[ "${{ github.event.inputs.force_build }}" == "true" ]] || [[ "${EXISTING_TAG}" == "none" ]]; then
+            SHOULD_BUILD="true"
+          else
+            SHOULD_BUILD="false"
+          fi
+
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "SHOULD_BUILD=$SHOULD_BUILD" >> $GITHUB_OUTPUT
+
+          echo "Version: $VERSION"
+          echo "Existing tag: $EXISTING_TAG"
+          echo "Should build: $SHOULD_BUILD"
+
+  docker:
+    if: needs.get_env.outputs.SHOULD_BUILD == 'true'
+    runs-on: ubuntu-latest
+    needs: get_env
+    steps:
+      - name: Free disk space
+        run: |
+          echo "=== Before cleanup ==="
+          df -h
+
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
+          sudo apt-get clean
+          docker system prune -af
+
+          echo "=== After cleanup ==="
+          df -h
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_REPO_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ needs.get_env.outputs.VERSION }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VLLM_VERSION=0.14.0

@@ -1,5 +1,5 @@
 [project]
-name = "qwen3-asr-realtime-server"
+name = "qwen3-asr-realtime-api"
 version = "1.0.0"
 description = "Compatible Qwen3-ASR-realtime WebSocket API Server"
 readme = "README.md"
@@ -59,17 +59,17 @@ dev = [
 ]
 
 all = [
-    "qwen3-asr-realtime-server[demo,audio,dev]",
+    "qwen3-asr-realtime-api[demo,audio,dev]",
 ]
 
 [project.scripts]
 qwen3-asr-server = "main:run_server"
 
 [project.urls]
-Homepage = "https://github.com/your-org/qwen3-asr-realtime-server"
-Documentation = "https://github.com/your-org/qwen3-asr-realtime-server#readme"
-Repository = "https://github.com/your-org/qwen3-asr-realtime-server"
-Issues = "https://github.com/your-org/qwen3-asr-realtime-server/issues"
+Homepage = "https://github.com/your-org/qwen3-asr-realtime-api"
+Documentation = "https://github.com/your-org/qwen3-asr-realtime-api#readme"
+Repository = "https://github.com/your-org/qwen3-asr-realtime-api"
+Issues = "https://github.com/your-org/qwen3-asr-realtime-api/issues"
 
 [build-system]
 requires = ["hatchling"]
