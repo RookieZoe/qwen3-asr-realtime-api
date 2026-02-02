@@ -59,10 +59,29 @@ class ASRManager:
     async def unload_model(self):
         """Unload model and free GPU memory."""
         if self.model:
+            # Properly shutdown vLLM engine to release GPU resources
+            # Qwen3ASRModel.model is the raw vllm.LLM instance
+            vllm_llm = getattr(self.model, "model", None)
+            if vllm_llm is not None:
+                # vLLM LLM has llm_engine -> engine_core with shutdown()
+                llm_engine = getattr(vllm_llm, "llm_engine", None)
+                if llm_engine is not None:
+                    engine_core = getattr(llm_engine, "engine_core", None)
+                    if engine_core is not None and hasattr(engine_core, "shutdown"):
+                        try:
+                            logger.info("Shutting down vLLM engine core...")
+                            engine_core.shutdown()
+                            logger.info("vLLM engine core shutdown complete")
+                        except Exception as e:
+                            logger.warning(f"Error during engine core shutdown: {e}")
+
             del self.model
             self.model = None
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+
             logger.info("Model unloaded")
 
     def get_model(self):
