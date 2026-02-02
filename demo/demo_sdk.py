@@ -34,8 +34,6 @@ DEFAULT_API_KEY = "dummy-api-key-for-local-server"
 # ==================== 日志配置 ====================
 
 def setup_logging():
-
-def setup_logging():
     """配置日志输出"""
     import logging
 
@@ -136,6 +134,34 @@ class ASRCallback(OmniRealtimeCallback):
 # ==================== 音频处理 ====================
 
 
+def list_audio_devices():
+    """列出所有可用的音频输入设备"""
+    try:
+        import pyaudio
+    except ImportError:
+        print("请先安装 pyaudio: pip install pyaudio")
+        return []
+
+    audio = pyaudio.PyAudio()
+    devices = []
+
+    print("\n🎤 可用音频输入设备:")
+    print("-" * 60)
+
+    for i in range(audio.get_device_count()):
+        info = audio.get_device_info_by_index(i)
+        if int(info["maxInputChannels"]) > 0:  # 仅显示输入设备
+            is_default = info.get("index") == audio.get_default_input_device_info().get("index")
+            default_marker = " ⭐ (默认)" if is_default else ""
+            print(f"  [{i}] {info['name']}{default_marker}")
+            print(f"      采样率: {int(info['defaultSampleRate'])} Hz, 输入通道: {int(info['maxInputChannels'])}")
+            devices.append({"index": i, "name": info["name"], "is_default": is_default})
+
+    print("-" * 60)
+    audio.terminate()
+    return devices
+
+
 def read_audio_chunks(file_path, chunk_size=3200):
     """按块读取音频文件 (3200 bytes = 0.1s PCM16/16kHz)"""
     with open(file_path, "rb") as f:
@@ -168,11 +194,17 @@ def send_audio_file(conversation, file_path, delay=0.1):
 # ==================== 主程序 ====================
 
 
-def run_vad_mode(url, api_key, language="auto"):
+def run_vad_mode(url, api_key, language="auto", device_index=None):
     """
     VAD 模式: 实时录音识别
 
     需要安装: pip install pyaudio
+
+    Args:
+        url: WebSocket 服务地址
+        api_key: API Key
+        language: 识别语言
+        device_index: 音频输入设备索引 (None 表示使用默认设备)
     """
     try:
         import pyaudio
@@ -185,6 +217,21 @@ def run_vad_mode(url, api_key, language="auto"):
     print("=" * 60)
     print(f"服务端: {url}")
     print(f"语言: {language}")
+
+    # 获取设备信息
+    audio = pyaudio.PyAudio()
+    if device_index is not None:
+        try:
+            device_info = audio.get_device_info_by_index(device_index)
+            print(f"音频设备: [{device_index}] {device_info['name']}")
+        except Exception as e:
+            print(f"❌ 无效的设备索引 {device_index}: {e}")
+            audio.terminate()
+            return
+    else:
+        device_info = audio.get_default_input_device_info()
+        print(f"音频设备: [默认] {device_info['name']}")
+
     print("按 Ctrl+C 停止录音\n")
 
     # 创建回调
@@ -219,10 +266,14 @@ def run_vad_mode(url, api_key, language="auto"):
     CHANNELS = 1
     RATE = 16000
 
-    # 初始化录音
-    audio = pyaudio.PyAudio()
+    # 初始化录音 (复用已创建的 audio 实例)
     stream = audio.open(
-        format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK
+        format=FORMAT,
+        channels=CHANNELS,
+        rate=RATE,
+        input=True,
+        frames_per_buffer=CHUNK,
+        input_device_index=device_index,
     )
 
     print("🎤 开始录音...\n")
@@ -333,8 +384,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  # VAD 模式 (实时录音)
+  # 列出可用音频设备
+  python demo_sdk.py --list-devices
+
+  # VAD 模式 (使用默认音频设备)
   python demo_sdk.py --mode vad --url ws://localhost:8080/api-ws/v1/realtime
+
+  # VAD 模式 (指定音频设备)
+  python demo_sdk.py --mode vad --device 2
 
   # Manual 模式 (音频文件)
   python demo_sdk.py --mode manual --file test.wav --url ws://localhost:8080/api-ws/v1/realtime
@@ -378,7 +435,25 @@ def main():
         "--api-key", "-k", default=DEFAULT_API_KEY, help="API Key (本地服务可随意填写)"
     )
 
+    parser.add_argument(
+        "--list-devices",
+        action="store_true",
+        help="列出所有可用的音频输入设备",
+    )
+
+    parser.add_argument(
+        "--device",
+        type=int,
+        default=None,
+        help="音频输入设备索引 (使用 --list-devices 查看可用设备)",
+    )
+
     args = parser.parse_args()
+
+    # 列出设备模式
+    if args.list_devices:
+        list_audio_devices()
+        return
 
     # 设置日志
     setup_logging()
@@ -388,7 +463,7 @@ def main():
 
     # 运行
     if args.mode == "vad":
-        run_vad_mode(args.url, args.api_key, args.language)
+        run_vad_mode(args.url, args.api_key, args.language, args.device)
     else:
         if not args.file:
             print("❌ Manual 模式需要指定 --file 参数")
@@ -398,3 +473,4 @@ def main():
 
 
 if __name__ == "__main__":
+    main()

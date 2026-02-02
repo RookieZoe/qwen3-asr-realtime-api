@@ -533,6 +533,27 @@
 
                 <div class="config-row">
                     <div class="config-item">
+                        <label>音频来源</label>
+                        <select id="audioSource" onchange="onAudioSourceChange()">
+                            <option value="microphone" selected>🎤 麦克风</option>
+                            <option value="screen">🖥️ 屏幕共享 (系统音频)</option>
+                        </select>
+                    </div>
+                    <div class="config-item" id="deviceSelectWrapper">
+                        <label>音频输入设备</label>
+                        <select id="audioDevice">
+                            <option value="">加载中...</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="screenShareInfo" class="info-box" style="display: none; background: #fff3cd; border-left-color: #ffc107;">
+                    <h4>⚠️ 屏幕共享音频说明</h4>
+                    <p>点击"开始录音"后，请在弹窗中选择要共享的标签页或整个屏幕，并<strong>勾选"共享系统音频"</strong>复选框。仅 Chrome/Edge 桌面版支持。</p>
+                </div>
+
+                <div class="config-row">
+                    <div class="config-item">
                         <label>VAD 阈值 (0.0-1.0，越低越敏感)</label>
                         <input type="number" id="vadThreshold" value="0.3" min="0" max="1" step="0.1">
                     </div>
@@ -925,6 +946,66 @@
         }
 
         // ============ VAD 模式 ============
+        
+        // 音频来源切换
+        function onAudioSourceChange() {
+            const source = document.getElementById('audioSource').value;
+            const deviceWrapper = document.getElementById('deviceSelectWrapper');
+            const screenShareInfo = document.getElementById('screenShareInfo');
+            
+            if (source === 'screen') {
+                deviceWrapper.style.display = 'none';
+                screenShareInfo.style.display = 'block';
+            } else {
+                deviceWrapper.style.display = 'block';
+                screenShareInfo.style.display = 'none';
+            }
+        }
+        
+        // 获取屏幕共享音频流
+        async function getScreenShareAudioStream() {
+            try {
+                const stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: {
+                        width: { ideal: 1 },
+                        height: { ideal: 1 },
+                        frameRate: { ideal: 1 }
+                    },
+                    audio: {
+                        channelCount: 1,
+                        sampleRate: 16000,
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    },
+                    systemAudio: 'include',
+                    surfaceSwitching: 'exclude',
+                    selfBrowserSurface: 'include'
+                });
+                
+                // 检查是否有音频轨道
+                const audioTracks = stream.getAudioTracks();
+                if (audioTracks.length === 0) {
+                    // 停止视频轨道
+                    stream.getVideoTracks().forEach(track => track.stop());
+                    throw new Error('未获取到系统音频。请确保在弹窗中勾选了"共享系统音频"选项。');
+                }
+                
+                console.log('[screen-share] 成功获取屏幕共享音频:', audioTracks[0].label);
+                
+                // 停止视频轨道（我们只需要音频）
+                stream.getVideoTracks().forEach(track => track.stop());
+                
+                // 返回只包含音频的流
+                return new MediaStream(audioTracks);
+            } catch (error) {
+                if (error.name === 'NotAllowedError') {
+                    throw new Error('用户取消了屏幕共享');
+                }
+                throw error;
+            }
+        }
+        
         function initVisualizer() {
             const container = document.getElementById('vadVisualizer');
             container.innerHTML = '';
@@ -951,14 +1032,32 @@
                 resetResults();
                 await connectWebSocket('vad');
                 
-                vadMediaStream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
+                // 根据音频来源获取媒体流
+                const audioSource = document.getElementById('audioSource').value;
+                
+                if (audioSource === 'screen') {
+                    // 屏幕共享模式 - 捕获系统音频
+                    console.log('[audio] 使用屏幕共享捕获系统音频');
+                    vadMediaStream = await getScreenShareAudioStream();
+                } else {
+                    // 麦克风模式
+                    const selectedDeviceId = document.getElementById('audioDevice').value;
+                    const audioConstraints = {
                         channelCount: 1,
                         sampleRate: 16000,
                         echoCancellation: true,
                         noiseSuppression: true
+                    };
+                    
+                    if (selectedDeviceId) {
+                        audioConstraints.deviceId = { exact: selectedDeviceId };
                     }
-                });
+                    
+                    console.log('[audio] 使用麦克风:', selectedDeviceId || '默认');
+                    vadMediaStream = await navigator.mediaDevices.getUserMedia({
+                        audio: audioConstraints
+                    });
+                }
                 
                 vadAudioContext = new (window.AudioContext || window.webkitAudioContext)({
                     sampleRate: 16000
@@ -1005,13 +1104,20 @@
                 vadProcessor.connect(vadAudioContext.destination);
                 
                 vadIsRecording = true;
-                updateStatus('vad', true, true);
+                
+                // 根据音频来源更新状态显示
+                if (audioSource === 'screen') {
+                    updateStatus('vad', true, true);
+                    document.getElementById('vadStatusText').textContent = '屏幕共享中...';
+                } else {
+                    updateStatus('vad', true, true);
+                }
                 
                 document.getElementById('vadStartBtn').disabled = true;
                 document.getElementById('vadStopBtn').disabled = false;
                 
                 initVisualizer();
-                console.log('[recording] VAD 模式开始录音');
+                console.log(`[recording] VAD 模式开始 (${audioSource === 'screen' ? '屏幕共享' : '麦克风'})`);
                 
             } catch (error) {
                 console.error('[error] VAD 开始失败:', error.message);
@@ -1265,6 +1371,53 @@
         }
 
         initVisualizer();
+        
+        // 加载音频设备列表
+        async function loadAudioDevices() {
+            const select = document.getElementById('audioDevice');
+            select.innerHTML = '<option value="">加载中...</option>';
+            
+            try {
+                // 先请求麦克风权限，否则无法获取设备标签
+                await navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(stream => {
+                        // 获取权限后立即释放
+                        stream.getTracks().forEach(track => track.stop());
+                    });
+                
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const audioInputs = devices.filter(d => d.kind === 'audioinput');
+                
+                select.innerHTML = '';
+                
+                if (audioInputs.length === 0) {
+                    select.innerHTML = '<option value="">未检测到音频设备</option>';
+                    return;
+                }
+                
+                audioInputs.forEach((device, index) => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.textContent = device.label || `麦克风 ${index + 1}`;
+                    if (device.deviceId === 'default' || index === 0) {
+                        option.selected = true;
+                    }
+                    select.appendChild(option);
+                });
+                
+                console.log(`[audio] 检测到 ${audioInputs.length} 个音频输入设备`);
+            } catch (error) {
+                console.error('[audio] 获取设备列表失败:', error.message);
+                select.innerHTML = '<option value="">获取设备失败 - 请允许麦克风权限</option>';
+            }
+        }
+        
+        // 监听设备变化
+        navigator.mediaDevices.addEventListener('devicechange', loadAudioDevices);
+        
+        // 初始加载设备列表
+        loadAudioDevices();
+        
         console.log('[system] 页面加载完成');
     </script>
 </body>
