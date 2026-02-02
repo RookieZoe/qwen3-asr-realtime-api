@@ -33,7 +33,10 @@ class SileroVAD:
         self.last_speech_sample: int = 0
         self.silence_counter: int = 0
 
-        # Buffer for incomplete windows
+        self._ever_had_speech: bool = False
+        self._initial_silence_samples: int = 0
+        self._initial_silence_reported: bool = False
+
         self._buffer: np.ndarray = np.array([], dtype=np.float32)
 
     def _load_model(self):
@@ -62,6 +65,9 @@ class SileroVAD:
         self.speech_start_sample = 0
         self.last_speech_sample = 0
         self.silence_counter = 0
+        self._ever_had_speech = False
+        self._initial_silence_samples = 0
+        self._initial_silence_reported = False
         self._buffer = np.array([], dtype=np.float32)
 
     def process(self, audio_chunk: np.ndarray, total_samples: int) -> Dict[str, Any]:
@@ -121,6 +127,9 @@ class SileroVAD:
         window_end = window_start + len(window)
 
         if speech_prob > self.threshold:
+            self._ever_had_speech = True
+            self._initial_silence_samples = 0
+
             if not self.is_speaking:
                 self.is_speaking = True
                 self.speech_start_sample = window_start
@@ -137,6 +146,13 @@ class SileroVAD:
                     self.is_speaking = False
                     result["speech_stopped"] = True
                     result["audio_end_ms"] = int(self.last_speech_sample / self.sample_rate * 1000)
+            elif not self._ever_had_speech and not self._initial_silence_reported:
+                self._initial_silence_samples += len(window)
+
+                if self._initial_silence_samples >= self.silence_samples:
+                    self._initial_silence_reported = True
+                    result["speech_stopped"] = True
+                    result["audio_end_ms"] = int(window_end / self.sample_rate * 1000)
 
         return result
 

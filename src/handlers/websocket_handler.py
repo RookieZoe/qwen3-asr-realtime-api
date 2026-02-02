@@ -292,8 +292,15 @@ class WebSocketHandler:
                     )
                 )
 
-            if result.get("speech_stopped") and self.speech_active:
-                await self._handle_speech_stopped(result["audio_end_ms"])
+            if result.get("speech_stopped"):
+                if self.speech_active:
+                    await self._handle_speech_stopped(result["audio_end_ms"])
+                else:
+                    await self._send_event(
+                        create_speech_stopped_event(
+                            audio_end_ms=result["audio_end_ms"], item_id=None
+                        )
+                    )
         except Exception as e:
             logger.error(f"VAD processing error: {e}")
             import traceback

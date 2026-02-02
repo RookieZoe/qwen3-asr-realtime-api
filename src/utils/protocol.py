@@ -87,10 +87,11 @@ def create_speech_started_event(audio_start_ms: int, item_id: str) -> Dict[str, 
     )
 
 
-def create_speech_stopped_event(audio_end_ms: int, item_id: str) -> Dict[str, Any]:
-    return create_event(
-        "input_audio_buffer.speech_stopped", audio_end_ms=audio_end_ms, item_id=item_id
-    )
+def create_speech_stopped_event(audio_end_ms: int, item_id: Optional[str]) -> Dict[str, Any]:
+    event = create_event("input_audio_buffer.speech_stopped", audio_end_ms=audio_end_ms)
+    if item_id is not None:
+        event["item_id"] = item_id
+    return event
 
 
 def create_input_audio_buffer_committed_event(
