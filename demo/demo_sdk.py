@@ -4,9 +4,19 @@ Qwen3-ASR Realtime Python Demo
 使用官方 DashScope SDK 连接私有后端服务
 
 功能:
-- VAD 模式: 实时录音识别
-- Manual 模式: 音频文件识别
+- VAD 模式: 实时录音识别 (需要 pyaudio)
+- Manual 模式: 音频文件识别 (支持本地文件和 HTTP URL)
 - 支持实时显示识别结果
+- 自动转换 MP3/WAV/M4A/OGG 等格式为 PCM (需要 pydub + ffmpeg)
+
+依赖:
+  pip install dashscope>=1.25.6
+  pip install pydub  # 音频格式转换 (可选, 仅 Manual 模式需要)
+  pip install pyaudio  # 实时录音 (可选, 仅 VAD 模式需要)
+
+  # ffmpeg 需要系统安装:
+  # Ubuntu/Debian: apt install ffmpeg
+  # macOS: brew install ffmpeg
 """
 
 import argparse
@@ -14,24 +24,31 @@ import base64
 import os
 import signal
 import sys
+import tempfile
 import time
 from datetime import datetime
+from urllib.parse import urlparse
 
 # 安装: pip install dashscope>=1.25.6
 import dashscope
-from dashscope.audio.qwen_omni import OmniRealtimeCallback, OmniRealtimeConversation
+from dashscope.audio.qwen_omni import MultiModality, OmniRealtimeCallback, OmniRealtimeConversation
 from dashscope.audio.qwen_omni.omni_realtime import TranscriptionParams
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ==================== 配置 ====================
 
 # 私有后端服务地址 (修改为你的服务地址)
 DEFAULT_WS_URL = "ws://localhost:8080/api-ws/v1/realtime"
+# DEFAULT_WS_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
 
 # API Key (私有服务通常不需要，但 SDK 要求提供，可以随便填)
-DEFAULT_API_KEY = "dummy-api-key-for-local-server"
+DEFAULT_API_KEY = os.getenv("QWEN3_DASHSCOPE_API_KEY", "")
 
 
 # ==================== 日志配置 ====================
+
 
 def setup_logging():
     """配置日志输出"""
@@ -134,6 +151,131 @@ class ASRCallback(OmniRealtimeCallback):
 # ==================== 音频处理 ====================
 
 
+def is_remote_url(path: str) -> bool:
+    """检查路径是否为远程 URL"""
+    try:
+        parsed = urlparse(path)
+        return parsed.scheme in ("http", "https")
+    except Exception:
+        return False
+
+
+def download_remote_audio(url: str, timeout: int = 60) -> str:
+    """
+    下载远程音频文件到临时目录
+
+    Args:
+        url: 远程音频文件 URL
+        timeout: 下载超时时间 (秒)
+
+    Returns:
+        临时文件路径
+    """
+    import urllib.error
+    import urllib.request
+
+    print(f"🌐 下载远程音频: {url}")
+
+    # 从 URL 提取文件扩展名
+    parsed = urlparse(url)
+    path = parsed.path
+    ext = os.path.splitext(path)[1] or ".wav"
+
+    # 创建临时文件
+    fd, temp_path = tempfile.mkstemp(suffix=ext, prefix="qwen_asr_")
+    os.close(fd)
+
+    try:
+        # 设置请求头 (模拟浏览器)
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        request = urllib.request.Request(url, headers=headers)
+
+        # 下载文件
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            total_size = response.headers.get("Content-Length")
+            if total_size:
+                total_size = int(total_size)
+                print(f"   文件大小: {total_size / 1024 / 1024:.2f} MB")
+
+            # 写入临时文件
+            with open(temp_path, "wb") as f:
+                downloaded = 0
+                chunk_size = 8192
+                while True:
+                    chunk = response.read(chunk_size)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size:
+                        progress = downloaded / total_size * 100
+                        print(f"\r   下载进度: {progress:.1f}%", end="", flush=True)
+
+        print(f"\n✅ 下载完成: {temp_path}")
+        return temp_path
+
+    except urllib.error.HTTPError as e:
+        os.unlink(temp_path)
+        raise RuntimeError(f"HTTP 错误 {e.code}: {e.reason}")
+    except urllib.error.URLError as e:
+        os.unlink(temp_path)
+        raise RuntimeError(f"URL 错误: {e.reason}")
+    except Exception as e:
+        os.unlink(temp_path)
+        raise RuntimeError(f"下载失败: {e}")
+
+
+def convert_audio_to_pcm(input_path: str) -> str:
+    """
+    将任意音频格式转换为 PCM (16kHz, 16-bit, mono)
+
+    支持格式: MP3, WAV, M4A, OGG, FLAC, AAC 等
+
+    Args:
+        input_path: 输入音频文件路径
+
+    Returns:
+        转换后的 PCM 文件路径 (临时文件)
+
+    Requires:
+        pip install pydub
+        ffmpeg 需要安装在系统中
+    """
+    try:
+        from pydub import AudioSegment
+    except ImportError:
+        raise RuntimeError(
+            "需要安装 pydub 来转换音频格式: pip install pydub\n"
+            "同时需要安装 ffmpeg: apt install ffmpeg 或 brew install ffmpeg"
+        )
+
+    print(f"🔄 转换音频格式为 PCM (16kHz, 16-bit, mono)...")
+
+    try:
+        # 加载音频文件 (pydub 会自动检测格式)
+        audio = AudioSegment.from_file(input_path)
+
+        # 转换参数
+        audio = audio.set_frame_rate(16000)  # 16kHz
+        audio = audio.set_sample_width(2)  # 16-bit
+        audio = audio.set_channels(1)  # mono
+
+        # 导出为 raw PCM
+        fd, pcm_path = tempfile.mkstemp(suffix=".pcm", prefix="qwen_asr_")
+        os.close(fd)
+
+        # 导出为 raw PCM 格式
+        audio.export(pcm_path, format="s16le", parameters=["-ar", "16000", "-ac", "1"])
+
+        duration = len(audio) / 1000  # 毫秒转秒
+        print(f"✅ 转换完成: {duration:.1f}s, {os.path.getsize(pcm_path)} bytes")
+
+        return pcm_path
+
+    except Exception as e:
+        raise RuntimeError(f"音频转换失败: {e}")
+
+
 def list_audio_devices():
     """列出所有可用的音频输入设备"""
     try:
@@ -154,7 +296,9 @@ def list_audio_devices():
             is_default = info.get("index") == audio.get_default_input_device_info().get("index")
             default_marker = " ⭐ (默认)" if is_default else ""
             print(f"  [{i}] {info['name']}{default_marker}")
-            print(f"      采样率: {int(info['defaultSampleRate'])} Hz, 输入通道: {int(info['maxInputChannels'])}")
+            print(
+                f"      采样率: {int(info['defaultSampleRate'])} Hz, 输入通道: {int(info['maxInputChannels'])}"
+            )
             devices.append({"index": i, "name": info["name"], "is_default": is_default})
 
     print("-" * 60)
@@ -242,16 +386,19 @@ def run_vad_mode(url, api_key, language="auto", device_index=None):
         model="qwen3-asr-flash-realtime", url=url, callback=callback
     )
 
-    # 配置
-    transcription_params = TranscriptionParams(
-        language=language, sample_rate=16000, input_audio_format="pcm"
-    )
+    # 配置 (language=auto 时不设置 language 参数，让服务端自动检测)
+    if language == "auto":
+        transcription_params = TranscriptionParams(sample_rate=16000, input_audio_format="pcm")
+    else:
+        transcription_params = TranscriptionParams(
+            language=language, sample_rate=16000, input_audio_format="pcm"
+        )
 
     # 连接
     conversation.connect()
 
     conversation.update_session(
-        output_modalities=["text"],
+        output_modalities=[MultiModality.TEXT],
         enable_turn_detection=True,
         turn_detection_type="server_vad",
         turn_detection_threshold=0.3,
@@ -307,6 +454,8 @@ def run_vad_mode(url, api_key, language="auto", device_index=None):
 def run_manual_mode(url, api_key, audio_file, language="auto", delay=0.1):
     """
     Manual 模式: 音频文件识别
+
+    支持本地文件路径和 HTTP/HTTPS 远程 URL
     """
     print("=" * 60)
     print("📁 Manual 模式 - 音频文件识别")
@@ -316,35 +465,68 @@ def run_manual_mode(url, api_key, audio_file, language="auto", delay=0.1):
     print(f"语言: {language}")
     print(f"发送间隔: {delay}s\n")
 
-    # 创建回调
-    callback = ASRCallback()
+    # 处理远程 URL
+    temp_file = None
+    pcm_file = None
+    local_audio_file = audio_file
 
-    # 创建会话
-    conversation = OmniRealtimeConversation(
-        model="qwen3-asr-flash-realtime", url=url, callback=callback
-    )
+    if is_remote_url(audio_file):
+        try:
+            temp_file = download_remote_audio(audio_file)
+            local_audio_file = temp_file
+        except Exception as e:
+            print(f"❌ 下载远程文件失败: {e}")
+            return
 
-    # 配置
-    transcription_params = TranscriptionParams(
-        language=language, sample_rate=16000, input_audio_format="pcm"
-    )
+    # 检测是否需要转换格式 (非 .pcm 文件都需要转换)
+    file_ext = os.path.splitext(local_audio_file)[1].lower()
+    if file_ext != ".pcm":
+        try:
+            pcm_file = convert_audio_to_pcm(local_audio_file)
+            local_audio_file = pcm_file
+        except Exception as e:
+            print(f"❌ 音频格式转换失败: {e}")
+            # 清理已下载的临时文件
+            if temp_file and os.path.exists(temp_file):
+                os.unlink(temp_file)
+            return
 
-    # 连接
-    conversation.connect()
-
-    conversation.update_session(
-        output_modalities=["text"],
-        enable_turn_detection=False,  # Manual 模式关闭 VAD
-        enable_input_audio_transcription=True,
-        transcription_params=transcription_params,
-    )
-
-    # 等待会话配置完成
-    time.sleep(1)
+    # 初始化变量
+    callback = None
+    conversation = None
 
     try:
-        # 发送音频
-        send_audio_file(conversation, audio_file, delay)
+        # 创建回调
+        callback = ASRCallback()
+
+        # 创建会话
+        conversation = OmniRealtimeConversation(
+            model="qwen3-asr-flash-realtime", url=url, callback=callback
+        )
+
+        # 配置 (language=auto 时不设置 language 参数，让服务端自动检测)
+        if language == "auto":
+            transcription_params = TranscriptionParams(sample_rate=16000, input_audio_format="pcm")
+        else:
+            transcription_params = TranscriptionParams(
+                language=language, sample_rate=16000, input_audio_format="pcm"
+            )
+
+        # 连接
+        conversation.connect()
+
+        conversation.update_session(
+            output_modalities=[MultiModality.TEXT],
+            enable_turn_detection=False,  # Manual 模式关闭 VAD
+            enable_input_audio_transcription=True,
+            transcription_params=transcription_params,
+        )
+
+        # 等待会话配置完成
+        time.sleep(1)
+
+        # 发送音频 (使用本地文件路径)
+        send_audio_file(conversation, local_audio_file, delay)
 
         # 提交识别 (Manual 模式需要)
         print("\n📤 提交识别...")
@@ -368,10 +550,24 @@ def run_manual_mode(url, api_key, audio_file, language="auto", delay=0.1):
     except Exception as e:
         print(f"\n❌ 错误: {e}")
     finally:
-        conversation.close()
+        if conversation is not None:
+            conversation.close()
+
+        # 清理临时文件
+        for tmp in [pcm_file, temp_file]:
+            if tmp and os.path.exists(tmp):
+                try:
+                    os.unlink(tmp)
+                except Exception:
+                    pass
+        if pcm_file or temp_file:
+            print("🗑️ 已清理临时文件")
 
         print(f"\n{'=' * 60}")
-        print(f"📝 最终识别结果:\n{callback.confirmed_text}")
+        if callback is not None:
+            print(f"📝 最终识别结果:\n{callback.confirmed_text}")
+        else:
+            print("📝 最终识别结果: (无)")
         print(f"{'=' * 60}")
 
 
@@ -393,8 +589,11 @@ def main():
   # VAD 模式 (指定音频设备)
   python demo_sdk.py --mode vad --device 2
 
-  # Manual 模式 (音频文件)
-  python demo_sdk.py --mode manual --file test.wav --url ws://localhost:8080/api-ws/v1/realtime
+  # Manual 模式 (本地音频文件)
+  python demo_sdk.py --mode manual --file test.wav
+
+  # Manual 模式 (远程 HTTP URL)
+  python demo_sdk.py --mode manual --file https://example.com/audio.wav
 
   # 指定语言
   python demo_sdk.py --mode manual --file test.wav --language zh
@@ -416,7 +615,7 @@ def main():
     parser.add_argument(
         "--file",
         "-f",
-        help="音频文件路径 (Manual 模式必需, 支持 WAV/PCM 格式, 16kHz, 16-bit, 单声道)",
+        help="音频文件路径或 HTTP URL (支持 MP3/WAV/M4A/OGG 等格式, 自动转换为 PCM)",
     )
 
     parser.add_argument(
